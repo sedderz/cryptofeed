@@ -13,11 +13,12 @@ from cryptofeed.backends.backend import BackendBookCallback, BackendCallback
 
 
 class KafkaCallback:
-    def __init__(self, bootstrap='127.0.0.1', port=9092, key=None, numeric_type=float, **kwargs):
+    def __init__(self, bootstrap='127.0.0.1', port=9092, key=None, suffix=None, numeric_type=float, **kwargs):
         self.bootstrap = bootstrap
         self.port = port
         self.producer = None
         self.key = key if key else self.default_key
+        self.suffix = suffix if suffix is not None else True
         self.numeric_type = numeric_type
 
     async def __connect(self):
@@ -31,7 +32,7 @@ class KafkaCallback:
 
     async def write(self, data: dict):
         await self.__connect()
-        topic = f"{self.key}-{data['exchange']}-{data['symbol']}"
+        topic = f"{self.key}-{data['exchange']}-{data['symbol']}" if self.suffix else f"{self.key}"
         await self.producer.send_and_wait(topic, json.dumps(data).encode('utf-8'))
 
 

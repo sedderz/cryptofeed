@@ -17,7 +17,7 @@ def trades_none_to_str(data):
 
 
 class RedisCallback(BackendQueue):
-    def __init__(self, host='127.0.0.1', port=6379, socket=None, key=None, numeric_type=float, **kwargs):
+    def __init__(self, host='127.0.0.1', port=6379, socket=None, key=None, suffix=None, numeric_type=float, **kwargs):
         """
         setting key lets you override the prefix on the
         key used in redis. The defaults are related to the data
@@ -29,6 +29,7 @@ class RedisCallback(BackendQueue):
 
         self.redis = aioredis.from_url(f"{prefix}{host}:{port}")
         self.key = key if key else self.default_key
+        self.suffix = suffix if suffix is not None else True
         self.numeric_type = numeric_type
         self.running = True
         self.exited = False
@@ -40,7 +41,7 @@ class RedisCallback(BackendQueue):
 
 
 class RedisZSetCallback(RedisCallback):
-    def __init__(self, host='127.0.0.1', port=6379, socket=None, key=None, numeric_type=float, score_key='timestamp', **kwargs):
+    def __init__(self, host='127.0.0.1', port=6379, socket=None, key=None, suffix=None, numeric_type=float, score_key='timestamp', **kwargs):
         """
         score_key: str
             the value at this key will be used to store the data in the ZSet in redis. The
@@ -48,7 +49,7 @@ class RedisZSetCallback(RedisCallback):
             use this to change it. It must be a numeric value.
         """
         self.score_key = score_key
-        super().__init__(host=host, port=port, socket=socket, key=key, numeric_type=numeric_type, **kwargs)
+        super().__init__(host=host, port=port, socket=socket, key=key, suffix=suffix, numeric_type=numeric_type, **kwargs)
 
     async def write(self, data: dict):
         score = data[self.score_key]
@@ -64,11 +65,13 @@ class RedisZSetCallback(RedisCallback):
                 async with self.read_many_queue(count) as updates:
                     async with self.redis.pipeline(transaction=False) as pipe:
                         for update in updates:
-                            pipe = pipe.zadd(f"{self.key}-{update['data']['exchange']}-{update['data']['symbol']}", {json.dumps(update['data']): update['score']}, nx=True)
+                            k = f"{self.key}-{update['data']['exchange']}-{update['data']['symbol']}" if self.suffix else f"{self.key}"
+                            pipe = pipe.zadd(k, {json.dumps(update['data']): update['score']}, nx=True)
                         await pipe.execute()
             else:
                 async with self.read_queue() as update:
-                    await self.redis.zadd(f"{self.key}-{update['data']['exchange']}-{update['data']['symbol']}", {json.dumps(update['data']): update['score']}, nx=True)
+                    k = f"{self.key}-{update['data']['exchange']}-{update['data']['symbol']}" if self.suffix else f"{self.key}"
+                    await self.redis.zadd(k, {json.dumps(update['data']): update['score']}, nx=True)
 
         await self.redis.close()
         await self.redis.connection_pool.disconnect()
@@ -89,11 +92,13 @@ class RedisStreamCallback(RedisCallback):
                 async with self.read_many_queue(count) as updates:
                     async with self.redis.pipeline(transaction=False) as pipe:
                         for update in updates:
-                            pipe = pipe.xadd(f"{self.key}-{update['exchange']}-{update['symbol']}", update)
+                            k = f"{self.key}-{update['exchange']}-{update['symbol']}" if self.suffix else f"{self.key}"
+                            pipe = pipe.xadd(k, update)
                         await pipe.execute()
             else:
                 async with self.read_queue() as update:
-                    await self.redis.xadd(f"{self.key}-{update['exchange']}-{update['symbol']}", update)
+                    k = f"{self.key}-{update['exchange']}-{update['symbol']}" if self.suffix else f"{self.key}"
+                    await self.redis.xadd(k, update)
 
         await self.redis.close()
         await self.redis.connection_pool.disconnect()
